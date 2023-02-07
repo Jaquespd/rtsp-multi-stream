@@ -4,6 +4,7 @@ import { Mpeg1Muxer, MuxerOptions } from './mpeg1-muxer';
 
 interface StreamOptions extends Omit<MuxerOptions, 'url'> {
     wsPort?: number;
+    server?: any;
 }
 
 interface WebSocketMeta extends WebSocket.WebSocket {
@@ -24,14 +25,16 @@ function getUrl(url: string): string | null {
 }
 
 export class VideoStream extends EventEmitter {
-
     public liveMuxers: Map<string, Mpeg1Muxer> = new Map<string, Mpeg1Muxer>();
 
     private wsServer?: Server<WebSocketMeta>;
 
     private readonly options?: StreamOptions;
 
-    private liveMuxerListeners: Map<string, MpegListener> = new Map<string, MpegListener>();
+    private liveMuxerListeners: Map<string, MpegListener> = new Map<
+        string,
+        MpegListener
+    >();
 
     public constructor(opt?: StreamOptions) {
         super();
@@ -43,13 +46,26 @@ export class VideoStream extends EventEmitter {
     }
 
     public start(): void {
-        this.wsServer = new Server<WebSocketMeta>({ port: this.options?.wsPort || 9999 });
+        if (!!this.options?.server) {
+            console.log('Create server');
+            this.wsServer = new Server<WebSocketMeta>({
+                server: this.options.server || 9999,
+            });
+        } else {
+            this.wsServer = new Server<WebSocketMeta>({
+                port: this.options?.wsPort || 9999,
+            });
+        }
 
         this.wsServer.on('connection', (socket, request) => {
-            if (!request.url) { return; }
+            if (!request.url) {
+                return;
+            }
 
             const liveUrl: string | null = getUrl(request.url);
-            if (!liveUrl) { return; }
+            if (!liveUrl) {
+                return;
+            }
 
             console.info('Socket connected', request.url);
 
@@ -57,18 +73,25 @@ export class VideoStream extends EventEmitter {
             socket.liveUrl = liveUrl;
 
             if (this.liveMuxers.has(liveUrl)) {
-                const muxer: Mpeg1Muxer | undefined = this.liveMuxers.get(liveUrl);
+                const muxer: Mpeg1Muxer | undefined =
+                    this.liveMuxers.get(liveUrl);
 
                 if (muxer) {
-                    const listenerFunc: MpegListener = data => {
+                    const listenerFunc: MpegListener = (data) => {
                         socket.send(data);
                     };
                     muxer.on('mpeg1data', listenerFunc);
 
-                    this.liveMuxerListeners.set(`${liveUrl}-${socket.id}`, listenerFunc);
+                    this.liveMuxerListeners.set(
+                        `${liveUrl}-${socket.id}`,
+                        listenerFunc
+                    );
                 }
             } else {
-                const muxer: Mpeg1Muxer = new Mpeg1Muxer({ ...this.options, url: liveUrl });
+                const muxer: Mpeg1Muxer = new Mpeg1Muxer({
+                    ...this.options,
+                    url: liveUrl,
+                });
                 this.liveMuxers.set(liveUrl, muxer);
 
                 muxer.on('liveErr', (errMsg: string | Buffer) => {
@@ -80,12 +103,15 @@ export class VideoStream extends EventEmitter {
                     socket.close(4104, errMsg);
                 });
 
-                const listenerFunc: MpegListener = data => {
+                const listenerFunc: MpegListener = (data) => {
                     socket.send(data);
                 };
                 muxer.on('mpeg1data', listenerFunc);
 
-                this.liveMuxerListeners.set(`${liveUrl}-${socket.id}`, listenerFunc);
+                this.liveMuxerListeners.set(
+                    `${liveUrl}-${socket.id}`,
+                    listenerFunc
+                );
             }
 
             socket.on('close', () => {
@@ -93,7 +119,9 @@ export class VideoStream extends EventEmitter {
 
                 if (this.wsServer?.clients.size == 0) {
                     if (this.liveMuxers.size > 0) {
-                        [...this.liveMuxers.values()].forEach(skt => { skt.stop(); });
+                        [...this.liveMuxers.values()].forEach((skt) => {
+                            skt.stop();
+                        });
                     }
                     this.liveMuxers = new Map<string, Mpeg1Muxer>();
                     this.liveMuxerListeners = new Map<string, MpegListener>();
@@ -104,9 +132,15 @@ export class VideoStream extends EventEmitter {
                 const socketId: string = socket.id;
 
                 if (this.liveMuxers.has(socketLiveUrl)) {
-                    const muxer: Mpeg1Muxer | undefined = this.liveMuxers.get(socketLiveUrl);
-                    if (!muxer) { return; }
-                    const listenerFunc: MpegListener | undefined = this.liveMuxerListeners.get(`${socketLiveUrl}-${socketId}`);
+                    const muxer: Mpeg1Muxer | undefined =
+                        this.liveMuxers.get(socketLiveUrl);
+                    if (!muxer) {
+                        return;
+                    }
+                    const listenerFunc: MpegListener | undefined =
+                        this.liveMuxerListeners.get(
+                            `${socketLiveUrl}-${socketId}`
+                        );
                     if (listenerFunc) {
                         muxer.removeListener('mpeg1data', listenerFunc);
                     }
@@ -125,8 +159,9 @@ export class VideoStream extends EventEmitter {
     public stop(): void {
         this.wsServer?.close();
         if (this.liveMuxers.size > 0) {
-            [...this.liveMuxers.values()].forEach(skt => { skt.stop(); });
+            [...this.liveMuxers.values()].forEach((skt) => {
+                skt.stop();
+            });
         }
     }
-
 }
